@@ -184,6 +184,6 @@ func getPath(p int, apiKey string) string {
 	case pathArchiveRecording:
 		return apiHost + "/v2/partner/" + apiKey + "/archive"
 	}
-	log.Println("Warning: could not find path")
+	log.Fatalln("Invalid API path")
 	return ""
 }
