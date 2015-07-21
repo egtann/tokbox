@@ -2,22 +2,18 @@ package tokbox
 
 import (
 	"bytes"
-	"io/ioutil"
-	"log"
-
-	"net/http"
-	"net/url"
-
+	"crypto/hmac"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-
-	"crypto/hmac"
-	"crypto/sha1"
-
 	"fmt"
+	"io/ioutil"
+	"log"
 	"math/rand"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -169,6 +165,7 @@ func (t *Tokbox) NewRecording(s *Session, hasAudio bool, hasVideo bool) (*Archiv
 	if err != nil {
 		return &Archive{}, errors.New("Couldn't read response body")
 	}
+
 	a := Archive{}
 	err = json.Unmarshal(body, &a)
 	if err != nil {
