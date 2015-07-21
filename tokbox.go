@@ -2,12 +2,16 @@ package tokbox
 
 import (
 	"bytes"
+	"io/ioutil"
+	"log"
 
 	"net/http"
 	"net/url"
 
 	"encoding/base64"
+	"encoding/json"
 	"encoding/xml"
+	"errors"
 
 	"crypto/hmac"
 	"crypto/sha1"
@@ -18,9 +22,11 @@ import (
 	"time"
 )
 
+const apiHost = "https://api.opentok.com"
+
 const (
-	apiHost    = "https://api.opentok.com/hl"
-	apiSession = "/session/create"
+	pathSession = iota
+	pathArchiveRecording
 )
 
 type Tokbox struct {
@@ -34,6 +40,11 @@ type Session struct {
 	CreateDt      string `xml:"create_dt"`
 	SessionStatus string `xml:"session_status"`
 	t             *Tokbox
+}
+
+type Archive struct {
+	Id        string `json:"id"`
+	SessionId string `json:"sessionId"`
 }
 
 //private - only for parsing xml purposes
@@ -93,21 +104,20 @@ func (t *Tokbox) NewSession(location string, p2p bool) (*Session, error) {
 	} else {
 		params.Add("p2p.preference", "disabled")
 	}
-	req, err := http.NewRequest("POST", apiHost+apiSession, strings.NewReader(params.Encode()))
+	req, err := http.NewRequest("POST", getPath(pathSession, t.apiKey), strings.NewReader(params.Encode()))
 	if err != nil {
 		return &Session{}, err
 	}
-	authHeader := t.apiKey + ":" + t.partnerSecret
-	req.Header.Add("X-TB-PARTNER-AUTH", authHeader)
+	req.Header.Add("X-TB-PARTNER-AUTH", t.apiKey+":"+t.partnerSecret)
 	client := http.Client{}
 	res, err := client.Do(req)
-	defer res.Body.Close()
 	if err != nil {
 		return &Session{}, err
 	}
 	if res.StatusCode != 200 {
 		return &Session{}, fmt.Errorf("Tokbox returns error code: %v", res.StatusCode)
 	}
+	defer res.Body.Close()
 
 	var s sessions
 	if err = xml.NewDecoder(res.Body).Decode(&s); err != nil {
@@ -120,4 +130,60 @@ func (t *Tokbox) NewSession(location string, p2p bool) (*Session, error) {
 	o := s.Sessions[0]
 	o.t = t
 	return &o, nil
+}
+
+func (t *Tokbox) NewRecording(s *Session, hasAudio bool, hasVideo bool) (*Archive, error) {
+	params := struct {
+		SessionId string `json:"sessionId"`
+		HasAudio  bool   `json:"hasAudio"`
+		HasVideo  bool   `json:"hasVideo"`
+	}{
+		SessionId: s.SessionId,
+		HasAudio:  hasAudio,
+		HasVideo:  hasVideo,
+	}
+
+	postData, err := json.Marshal(params)
+	if err != nil {
+		return &Archive{}, err
+	}
+
+	path := getPath(pathArchiveRecording, t.apiKey)
+	req, err := http.NewRequest("POST", path, bytes.NewBuffer(postData))
+	if err != nil {
+		return &Archive{}, err
+	}
+	req.Header.Add("X-TB-PARTNER-AUTH", t.apiKey+":"+t.partnerSecret)
+	req.Header.Add("Content-Type", "application/json")
+
+	client := http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		return &Archive{}, err
+	}
+	if res.StatusCode != 200 {
+		return &Archive{}, fmt.Errorf("Tokbox returns error code: %v", res.StatusCode)
+	}
+	defer res.Body.Close()
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return &Archive{}, errors.New("Couldn't read response body")
+	}
+	a := Archive{}
+	err = json.Unmarshal(body, &a)
+	if err != nil {
+		return &Archive{}, errors.New("Couldn't unmarshal JSON response")
+	}
+	return &a, nil
+}
+
+func getPath(p int, apiKey string) string {
+	switch p {
+	case pathSession:
+		return apiHost + "/session/create"
+	case pathArchiveRecording:
+		return apiHost + "/v2/partner/" + apiKey + "/archive"
+	}
+	log.Println("Warning: could not find path")
+	return ""
 }
